@@ -153,6 +153,8 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
     assert(results.size == 2)
   }
 
+
+
   sparkTest("call put multiple times on reads with same ReferenceRegion") {
 
     val region: ReferenceRegion = new ReferenceRegion("chr1", 0L, 99L)
@@ -387,4 +389,15 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
     assert(results(0) == (region1, "data1_mapped"))
   }
 
+  sparkTest("sampling IntervalRDD") {
+
+    val intArr = Array((region1, rec1), (region2, rec2), (region3, rec3))
+    val intArrRDD: RDD[(ReferenceRegion, String)] = sc.parallelize(intArr)
+
+    val testRDD: IntervalRDD[ReferenceRegion,  String] = IntervalRDD(intArrRDD)
+
+    val newRDD = testRDD.sample(false, 0.5)
+
+    assert(newRDD.collect().size < 3)
+  }
 }

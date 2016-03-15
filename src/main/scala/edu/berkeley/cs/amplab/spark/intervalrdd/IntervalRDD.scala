@@ -17,13 +17,16 @@
 
 package edu.berkeley.cs.amplab.spark.intervalrdd
 
+
+import org.apache.spark.util.random.{BernoulliSampler, PoissonSampler}
+
 import scala.reflect.ClassTag
 
 import org.apache.spark._
 import org.apache.spark.{ Partition, Dependency, SparkConf, Logging, SparkContext }
 import org.apache.spark.TaskContext
 import org.apache.spark.rdd.MetricsContext._
-import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.{PartitionwiseSampledRDD, RDD}
 import org.apache.spark.storage.StorageLevel
 import org.bdgenomics.adam.models.{ ReferenceRegion, Interval, SequenceDictionary }
 import org.bdgenomics.adam.rdd.GenomicPositionPartitioner
@@ -58,6 +61,14 @@ class IntervalRDD[K<: Interval: ClassTag, V: ClassTag](
   override def persist(newLevel: StorageLevel): this.type = {
     partitionsRDD.persist(newLevel)
     this
+  }
+
+  /** Persists the edge partitions using `targetStorageLevel`, which defaults to MEMORY_ONLY. */
+  override def sample(
+    withReplacement: Boolean,
+    fraction: Double,
+    seed: Long = scala.util.Random.nextLong): IntervalRDD[K,V] = {
+      new IntervalRDD(partitionsRDD.sample(withReplacement, fraction))
   }
 
   override def unpersist(blocking: Boolean = true): this.type = {
