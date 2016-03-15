@@ -189,6 +189,26 @@ class IntervalRDD[K<: Interval: ClassTag, V: ClassTag](
     val newPartitionsRDD = partitionsRDD.zipPartitions(convertedPartitions, true)((aiter, biter) => merger(aiter, biter))
     new IntervalRDD(newPartitionsRDD)
   }
+
+  /**
+    * Unconditionally updates the specified keys to have the specified value. Returns a new IntervalRDD
+    **/
+  def multiput(elems: IntervalRDD[K, V]): IntervalRDD[K, V] = {
+    val partitioned =
+      if (elems.partitioner.get.equals(partitioner.get)) elems.toRDD()
+      else {
+        elems.partitionBy(partitioner.get)
+      }
+
+    val convertedPartitions: RDD[IntervalPartition[K, V]] = partitioned.mapPartitions[IntervalPartition[K, V]](
+      iter => Iterator(IntervalPartition(iter)),
+      preservesPartitioning = true)
+
+    // merge the new partitions with existing partitions
+    val merger = new PartitionMerger[K, V]()
+    val newPartitionsRDD = partitionsRDD.zipPartitions(convertedPartitions, true)((aiter, biter) => merger(aiter, biter))
+    new IntervalRDD(newPartitionsRDD)
+  }
 }
 
 
