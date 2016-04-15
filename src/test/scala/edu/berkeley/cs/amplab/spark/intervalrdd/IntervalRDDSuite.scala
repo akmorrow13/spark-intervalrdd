@@ -29,20 +29,11 @@ import org.scalatest._
 import org.apache.spark.{ SparkConf, Logging, SparkContext }
 import org.apache.spark.TaskContext
 import org.apache.spark.rdd.RDD
-import org.scalatest.FunSuite
-import org.scalatest.Matchers
-import org.bdgenomics.adam.rdd.GenomicRegionPartitioner
-import org.bdgenomics.adam.models.{ ReferenceRegion, SequenceRecord, SequenceDictionary, ReferencePosition }
-import org.bdgenomics.utils.instrumentation.Metrics
-import org.bdgenomics.utils.instrumentation.{RecordedMetrics, MetricsListener}
-import org.apache.spark.rdd.MetricsContext._
-import java.io.PrintWriter
-import java.io.StringWriter
-import java.io.OutputStreamWriter
-import org.bdgenomics.adam.util.ADAMFunSuite
-
+import org.bdgenomics.adam.models.{ReferenceRegion, SequenceDictionary, SequenceRecord}
 import org.bdgenomics.adam.rdd.ADAMContext._
-import org.bdgenomics.formats.avro.{ AlignmentRecord, Feature, Genotype, GenotypeAllele, NucleotideContigFragment }
+import org.bdgenomics.adam.rdd.GenomicRegionPartitioner
+import org.bdgenomics.adam.util.ADAMFunSuite
+import org.bdgenomics.formats.avro.{AlignmentRecord, Genotype}
 
 
 class IntervalRDDSuite extends ADAMFunSuite with Logging {
@@ -65,7 +56,7 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
 
   sparkTest("Filter and count alignment data over 100 bases") {
 
-    val filePath = "src/test/resources/mouse_chrM.bam"
+    val filePath = "./mouse_chrM.bam"
     val region = new ReferenceRegion("chrM", 0L, 1000L)
     val interval = new ReferenceRegion("chrM", 0L, 100L)
 
@@ -82,7 +73,7 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
 
   sparkTest("Get alignment data over 1000 bases") {
 
-    val filePath = "src/test/resources/mouse_chrM.bam"
+    val filePath = "./mouse_chrM.bam"
     val region = new ReferenceRegion("chrM", 0L, 10000L)
     val interval = new ReferenceRegion("chrM", 0L, 1000L)
 
@@ -103,9 +94,6 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
     var intArr = Array((region1, rec1), (region2, rec2), (region3, rec3))
     var intArrRDD: RDD[(ReferenceRegion, String)] = sc.parallelize(intArr).partitionBy(new HashPartitioner(10))
 
-    val sd = new SequenceDictionary(Vector(SequenceRecord("chr1", 1000L),
-      SequenceRecord("chr2", 1000L),
-      SequenceRecord("chr3", 1000L)))
 
     var intRDD: IntervalRDD[ReferenceRegion,  String] = IntervalRDD(intArrRDD)
     val results = intRDD.get(region3)
@@ -116,24 +104,55 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
   }
 
 
-  sparkTest("merge new values into existing IntervalRDD") {
+  sparkTest("merge new values in array into existing IntervalRDD") {
 
     var intArr = Array((region1, rec1), (region2, rec2), (region3, rec3))
-    var intArrRDD: RDD[(ReferenceRegion, String)] = sc.parallelize(intArr)
+    val intArrRDD: RDD[(ReferenceRegion, String)] = sc.parallelize(intArr)
 
-    val sd = new SequenceDictionary(Vector(SequenceRecord("chr1", 1000L),
-      SequenceRecord("chr2", 1000L),
-      SequenceRecord("chr3", 1000L)))
-
-    var testRDD: IntervalRDD[ReferenceRegion,  String] = IntervalRDD(intArrRDD)
+    val testRDD: IntervalRDD[ReferenceRegion,  String] = IntervalRDD(intArrRDD)
 
     intArr = Array((region2, rec4), (region3, rec5))
 
     val newRDD: IntervalRDD[ReferenceRegion,  String] = testRDD.multiput(intArr)
-    var results = newRDD.get(region3)
+    val results = newRDD.get(region3)
 
     assert(results.size == 2)
   }
+
+  sparkTest("merge new values in IntervalRDD into existing IntervalRDD") {
+
+    val intArr = Array((region1, rec1), (region2, rec2), (region3, rec3))
+    val intArrRDD: RDD[(ReferenceRegion, String)] = sc.parallelize(intArr)
+
+    val testRDD: IntervalRDD[ReferenceRegion,  String] = IntervalRDD(intArrRDD)
+
+    val newIntArr = Array((region2, rec4), (region3, rec5))
+    val newIntArrRDD: RDD[(ReferenceRegion, String)] = sc.parallelize(newIntArr)
+    val newTestRDD: IntervalRDD[ReferenceRegion,  String] = IntervalRDD(newIntArrRDD)
+
+    val newRDD: IntervalRDD[ReferenceRegion,  String] = testRDD.multiput(newTestRDD)
+    val results = newRDD.get(region3)
+
+    assert(results.size == 2)
+  }
+
+  sparkTest("merge new values in IntervalRDD into existing IntervalRDD") {
+
+    val intArr = Array((region1, rec1), (region2, rec2), (region3, rec3))
+    val intArrRDD: RDD[(ReferenceRegion, String)] = sc.parallelize(intArr)
+
+    val testRDD: IntervalRDD[ReferenceRegion,  String] = IntervalRDD(intArrRDD)
+
+    val newIntArr = Array((region2, rec4), (region3, rec5))
+    val newIntArrRDD: RDD[(ReferenceRegion, String)] = sc.parallelize(newIntArr)
+    val newTestRDD: IntervalRDD[ReferenceRegion,  String] = IntervalRDD(newIntArrRDD)
+
+    val newRDD: IntervalRDD[ReferenceRegion,  String] = testRDD.multiput(newTestRDD)
+    val results = newRDD.get(region3)
+
+    assert(results.size == 2)
+  }
+
 
 
   sparkTest("call put multiple times on reads with same ReferenceRegion") {
@@ -191,7 +210,7 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
 
   sparkTest("test for vcf data") {
 
-    val filePath = "src/test/resources/6-sample.vcf"
+    val filePath = "./6-sample.vcf"
 
     val sd = new SequenceDictionary(Vector(SequenceRecord("6", 1999999L)))
 
@@ -211,7 +230,7 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
 
   sparkTest("test count function") {
 
-    val filePath = "src/test/resources/mouse_chrM.bam"
+    val filePath = "./mouse_chrM.bam"
     val region = new ReferenceRegion("chrM", 0L, 1000L)
 
     val sd = sc.adamDictionaryLoad[AlignmentRecord](filePath)
@@ -244,7 +263,7 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
 
 
   sparkTest("test explicit setting of number of partitions") {
-    val filePath = "src/test/resources/mouse_chrM.bam"
+    val filePath = "./mouse_chrM.bam"
     val region = new ReferenceRegion("chrM", 0L, 20000L)
 
     val sd = sc.adamDictionaryLoad[AlignmentRecord](filePath)
@@ -370,4 +389,15 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
     assert(results(0) == (region1, "data1_mapped"))
   }
 
+  sparkTest("sampling IntervalRDD") {
+
+    val intArr = Array((region1, rec1), (region2, rec2), (region3, rec3))
+    val intArrRDD: RDD[(ReferenceRegion, String)] = sc.parallelize(intArr)
+
+    val testRDD: IntervalRDD[ReferenceRegion,  String] = IntervalRDD(intArrRDD)
+
+    val newRDD = testRDD.sample(false, 0.5)
+
+    assert(newRDD.collect().size < 3)
+  }
 }

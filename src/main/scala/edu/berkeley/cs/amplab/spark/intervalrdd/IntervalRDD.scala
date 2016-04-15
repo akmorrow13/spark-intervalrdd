@@ -17,13 +17,16 @@
 
 package edu.berkeley.cs.amplab.spark.intervalrdd
 
+
+import org.apache.spark.util.random.{BernoulliSampler, PoissonSampler}
+
 import scala.reflect.ClassTag
 
 import org.apache.spark._
 import org.apache.spark.{ Partition, Dependency, SparkConf, Logging, SparkContext }
 import org.apache.spark.TaskContext
 import org.apache.spark.rdd.MetricsContext._
-import org.apache.spark.rdd.RDD
+import org.apache.spark.rdd.{PartitionwiseSampledRDD, RDD}
 import org.apache.spark.storage.StorageLevel
 import org.bdgenomics.adam.models.{ ReferenceRegion, Interval, SequenceDictionary }
 import org.bdgenomics.adam.rdd.GenomicPositionPartitioner
@@ -58,6 +61,14 @@ class IntervalRDD[K<: Interval: ClassTag, V: ClassTag](
   override def persist(newLevel: StorageLevel): this.type = {
     partitionsRDD.persist(newLevel)
     this
+  }
+
+  /** Persists the edge partitions using `targetStorageLevel`, which defaults to MEMORY_ONLY. */
+  override def sample(
+    withReplacement: Boolean,
+    fraction: Double,
+    seed: Long = scala.util.Random.nextLong): IntervalRDD[K,V] = {
+      new IntervalRDD(partitionsRDD.sample(withReplacement, fraction))
   }
 
   override def unpersist(blocking: Boolean = true): this.type = {
@@ -178,6 +189,26 @@ class IntervalRDD[K<: Interval: ClassTag, V: ClassTag](
       if (elems.partitioner.isDefined) elems
       else {
         elems.partitionBy(new HashPartitioner(elems.partitions.size))
+      }
+
+    val convertedPartitions: RDD[IntervalPartition[K, V]] = partitioned.mapPartitions[IntervalPartition[K, V]](
+      iter => Iterator(IntervalPartition(iter)),
+      preservesPartitioning = true)
+
+    // merge the new partitions with existing partitions
+    val merger = new PartitionMerger[K, V]()
+    val newPartitionsRDD = partitionsRDD.zipPartitions(convertedPartitions, true)((aiter, biter) => merger(aiter, biter))
+    new IntervalRDD(newPartitionsRDD)
+  }
+
+  /**
+    * Unconditionally updates the specified keys to have the specified value. Returns a new IntervalRDD
+    **/
+  def multiput(elems: IntervalRDD[K, V]): IntervalRDD[K, V] = {
+    val partitioned =
+      if (elems.partitioner.get.equals(partitioner.get)) elems.toRDD()
+      else {
+        elems.partitionBy(partitioner.get)
       }
 
     val convertedPartitions: RDD[IntervalPartition[K, V]] = partitioned.mapPartitions[IntervalPartition[K, V]](
