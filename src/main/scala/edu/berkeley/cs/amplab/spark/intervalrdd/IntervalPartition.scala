@@ -17,19 +17,11 @@
 
 package edu.berkeley.cs.amplab.spark.intervalrdd
 
-import scala.reflect.{classTag, ClassTag}
-
-import org.apache.spark._
-import org.apache.spark.SparkContext._
-import org.apache.spark.rdd.RDD
-import org.apache.spark.rdd.MetricsContext._
-import org.apache.spark.storage.StorageLevel
-import scala.collection.mutable.ListBuffer
-
-import edu.berkeley.cs.amplab.spark.intervalrdd._
-import com.github.erictu.intervaltree._
+import edu.berkeley.cs.amplab.spark.intervaltree._
 import org.apache.spark.Logging
-import org.bdgenomics.adam.models.{ Interval, ReferenceRegion }
+import org.bdgenomics.adam.models.Interval
+
+import scala.reflect.ClassTag
 
 class IntervalPartition[K <: Interval, V: ClassTag]
 	(protected val iTree: IntervalTree[K, V]) extends Serializable with Logging {
@@ -74,15 +66,15 @@ class IntervalPartition[K <: Interval, V: ClassTag]
   }
 
 	def filterByInterval(r: K): IntervalPartition[K, V] = {
-		val i: Iterator[(K, V)] = iTree.search(r).filter(kv => intervalOverlap(r, kv._1))
-    IntervalPartition(r, i)
+		val i: Iterator[(K, V)] = iTree.search(r)
+    IntervalPartition(i)
   }
 
   /**
    * Return a new IntervalPartition filtered by some predicate
    */
-  def filter(pred: (V => Boolean)): IntervalPartition[K, V] = {
-    new IntervalPartition(iTree.filterTree(pred))
+  def filter(pred: (K, V) => Boolean): IntervalPartition[K, V] = {
+    new IntervalPartition(iTree.filter(pred))
   }
 
 
@@ -90,23 +82,30 @@ class IntervalPartition[K <: Interval, V: ClassTag]
    * Applies a map function over the interval tree
    */
   def mapValues[V2: ClassTag](f: V => V2): IntervalPartition[K, V2] = {
-    val retTree: IntervalTree[K, (K, V2)] = iTree.mapValues(f)
+    val retTree: IntervalTree[K, V2] = iTree.mapValues(f)
     new IntervalPartition(retTree) //What's the point of withMap
   }
-
-
-
 
   /**
    * Puts all (k,v) data from partition within the specificed referenceregion
    *
    * @return IntervalPartition with new data
    */
-  def multiput(r: K, vs: Iterator[(K, V)]): IntervalPartition[K, V] = {
+  def multiput(r: K, vs: Iterator[V]): IntervalPartition[K, V] = {
     val newTree = iTree.snapshot()
     newTree.insert(r, vs)
     this.withMap(newTree)
   }
+
+  /**
+   * Puts all (k,v) data from partition within the specificed referenceregion
+   *
+   * @return IntervalPartition with new data
+   */
+  def put(r: K, v: V): IntervalPartition[K, V] = {
+    multiput(r, Iterator(v))
+  }
+
 
   /**
    * Merges trees of this partition with a specified partition
@@ -121,33 +120,11 @@ class IntervalPartition[K <: Interval, V: ClassTag]
 }
 
 private[intervalrdd] object IntervalPartition {
-  var chunkSize = 1000L
-
-  def matInterval[K <: Interval](region: K): K = {
-    val start = region.start / chunkSize * chunkSize
-    val end = region.end / chunkSize * chunkSize + (chunkSize - 1)
-
-		// TODO: can you do this more generally?
-		region match {
-		case _: ReferenceRegion => new ReferenceRegion(region.asInstanceOf[ReferenceRegion].referenceName, start, end).asInstanceOf[K]
-		case _ => {
-				println("Type not supported for interval materialization")
-				region
-			}
-		}
-  }
 
   def apply[K <: Interval, K2 <: Interval, V: ClassTag]
       (iter: Iterator[(K, V)]): IntervalPartition[K, V] = {
     val map = new IntervalTree[K, V]()
-    iter.foreach{kv => map.insert(matInterval(kv._1), (kv._1, kv._2))}
-    new IntervalPartition(map)
-  }
-
-  def apply[K <: Interval, V: ClassTag]
-      (r: K, iter: Iterator[(K, V)]): IntervalPartition[K, V] = {
-    val map = new IntervalTree[K, V]()
-    map.insert(r, iter)
+    map.insert(iter)
     new IntervalPartition(map)
   }
 

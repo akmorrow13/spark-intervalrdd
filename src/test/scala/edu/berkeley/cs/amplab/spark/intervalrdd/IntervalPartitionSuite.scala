@@ -18,11 +18,7 @@ F* WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 package edu.berkeley.cs.amplab.spark.intervalrdd
 
 import org.bdgenomics.adam.models.ReferenceRegion
-import com.github.erictu.intervaltree._
-import org.scalatest._
-import org.apache.spark.rdd.RDD
 import org.scalatest.FunSuite
-import org.scalatest.Matchers
 
 class IntervalPartitionSuite extends FunSuite  {
 
@@ -73,8 +69,8 @@ class IntervalPartitionSuite extends FunSuite  {
 
 		var partition: IntervalPartition[ReferenceRegion, Long] = new IntervalPartition[ReferenceRegion, Long]()
 
-		var newPartition = partition.multiput(region1, Iterator((region1, read1), (region1, read3)))
-		newPartition = newPartition.multiput(region2, Iterator((region2, read2), (region2, read4)))
+		var newPartition = partition.multiput(region1, Iterator(read1, read3))
+		newPartition = newPartition.multiput(region2, Iterator(read2, read4))
 
 		// assert values are in the new partition
 		var results: List[(ReferenceRegion, Long)] = newPartition.get(region1).toList
@@ -104,8 +100,8 @@ class IntervalPartitionSuite extends FunSuite  {
 
 		var partition: IntervalPartition[ReferenceRegion, Long] = new IntervalPartition[ReferenceRegion, Long]()
 
-		var newPartition = partition.multiput(region1, Iterator((region1, read1), (region1, read3)))
-		newPartition = newPartition.multiput(region2, Iterator((region2, read2), (region2, read4)))
+		var newPartition = partition.multiput(region1, Iterator(read1, read3))
+		newPartition = newPartition.multiput(region2, Iterator(read2, read4))
 
 		// assert values are in the new partition
 		var results: List[(ReferenceRegion, Long)] = newPartition.get(region1).toList
@@ -120,11 +116,9 @@ class IntervalPartitionSuite extends FunSuite  {
 	test("putting differing number of reads into different regions") {
 
 		var partition: IntervalPartition[ReferenceRegion, Long] = new IntervalPartition[ReferenceRegion, Long]()
-		val iter1 = Iterator((region1, read1), (region1, read3))
-		val iter2 = Iterator((region2, read4), (region2, read2), (region2, read5))
 
-		var newPartition = partition.multiput(region1, iter1)
-		newPartition = newPartition.multiput(region2, iter2)
+		var newPartition = partition.multiput(region1, Iterator(read1, read3))
+		newPartition = newPartition.multiput(region2, Iterator(read4, read2, read5))
 
 		// assert values are in the new partition
 		var results: List[(ReferenceRegion, Long)] = newPartition.get(region1).toList
@@ -142,10 +136,10 @@ class IntervalPartitionSuite extends FunSuite  {
 
 		var partition: IntervalPartition[ReferenceRegion, Long] = new IntervalPartition[ReferenceRegion, Long]()
 
-		var newPartition = partition.multiput(region1, Iterator((region1, read1), (region1, read3)))
-		newPartition = newPartition.multiput(region2, Iterator((region2, read2), (region2, read4)))
-		newPartition = newPartition.multiput(region4, Iterator((region4, read5)))
-		newPartition = newPartition.multiput(region5, Iterator((region5, read6)))
+		var newPartition = partition.multiput(region1, Iterator(read1, read3))
+		newPartition = newPartition.multiput(region2, Iterator(read2, read4))
+		newPartition = newPartition.put(region4, read5)
+		newPartition = newPartition.put(region5, read6)
 
 		val overlapReg: ReferenceRegion = new ReferenceRegion(chr, 0L, 200L)
 
@@ -158,10 +152,10 @@ class IntervalPartitionSuite extends FunSuite  {
 
 		var partition: IntervalPartition[ReferenceRegion, Long] = new IntervalPartition[ReferenceRegion, Long]()
 
-		var newPartition = partition.multiput(region1, Iterator((region1, read1), (region1, read3)))
-		newPartition = newPartition.multiput(region2, Iterator((region2, read2), (region2, read4)))
+		var newPartition = partition.multiput(region1, Iterator(read1, read3))
+		newPartition = newPartition.multiput(region2, Iterator(read2, read4))
 
-		val filtPart = newPartition.filter(elem => elem._2 < 300L)
+		val filtPart = newPartition.filter((k, v) => v < 300L)
 		val overlapReg: ReferenceRegion = new ReferenceRegion(chr, 0L, 300L)
 
 		val results = filtPart.get(overlapReg).toList
@@ -173,12 +167,12 @@ class IntervalPartitionSuite extends FunSuite  {
 
 		var partition: IntervalPartition[ReferenceRegion, Long] = new IntervalPartition[ReferenceRegion, Long]()
 
-		var newPartition = partition.multiput(region1, Iterator((region1, read1), (region1, read3)))
-		newPartition = newPartition.multiput(region2, Iterator((region2, read2), (region2, read4)))
+		var newPartition = partition.multiput(region1, Iterator(read1, read3))
+		newPartition = newPartition.multiput(region2, Iterator(read2, read4))
 
-		val filtPart = newPartition.mapValues(elem => (elem._1, elem._2 + 300L))
+		val filtPart = newPartition.mapValues(elem => elem + 300L)
 
-		val results = filtPart.filter(elem => elem._2 < 400L).get
+		val results = filtPart.filter((k, v) => v < 400L).get
 		assert(results.size == 2)
 
 	}

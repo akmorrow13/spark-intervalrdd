@@ -17,33 +17,15 @@
 
 package edu.berkeley.cs.amplab.spark.intervalrdd
 
-import scala.collection.immutable.LongMap
-import scala.reflect.ClassTag
-import org.apache.spark.HashPartitioner
-import org.apache.parquet.filter2.dsl.Dsl._
-
-import org.bdgenomics.adam.projections.{ Projection, GenotypeField }
-import org.apache.parquet.filter2.predicate.FilterPredicate
-import com.github.erictu.intervaltree._
-import org.scalatest._
-import org.apache.spark.{ SparkConf, Logging, SparkContext }
-import org.apache.spark.TaskContext
 import org.apache.spark.rdd.RDD
-import org.scalatest.FunSuite
-import org.scalatest.Matchers
-import org.bdgenomics.adam.rdd.GenomicRegionPartitioner
-import org.bdgenomics.adam.models.{ ReferenceRegion, SequenceRecord, SequenceDictionary, ReferencePosition }
-import org.bdgenomics.utils.instrumentation.Metrics
-import org.bdgenomics.utils.instrumentation.{RecordedMetrics, MetricsListener}
-import org.apache.spark.rdd.MetricsContext._
-import java.io.PrintWriter
-import java.io.StringWriter
-import java.io.OutputStreamWriter
-import org.bdgenomics.adam.util.ADAMFunSuite
-import scala.collection.mutable.ListBuffer
-
+import org.apache.spark.{HashPartitioner, Logging}
+import org.bdgenomics.adam.models.{ReferenceRegion, SequenceDictionary, SequenceRecord}
 import org.bdgenomics.adam.rdd.ADAMContext._
-import org.bdgenomics.formats.avro.{ AlignmentRecord, Feature, Genotype, GenotypeAllele, NucleotideContigFragment }
+import org.bdgenomics.adam.rdd.GenomicRegionPartitioner
+import org.bdgenomics.adam.util.ADAMFunSuite
+import org.bdgenomics.formats.avro.{AlignmentRecord, Genotype}
+
+import scala.collection.mutable.ListBuffer
 
 
 class IntervalRDDSuite extends ADAMFunSuite with Logging {
@@ -64,19 +46,23 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
   val rec5 = "data5"
   val rec6 = "data6"
 
+  val sd = new SequenceDictionary(Vector(
+    SequenceRecord("chrM", 16299L)))
+
+
+
   sparkTest("Filter and count alignment data over 100 bases") {
 
     val filePath = "src/test/resources/mouse_chrM.bam"
     val region = new ReferenceRegion("chrM", 0L, 1000L)
     val interval = new ReferenceRegion("chrM", 0L, 100L)
 
-    val sd = sc.adamDictionaryLoad[AlignmentRecord](filePath)
     val rdd: RDD[AlignmentRecord] = sc.loadIndexedBam(filePath, region)
 
     val alignmentRDD: RDD[(ReferenceRegion, AlignmentRecord)] = rdd.map(v => (ReferenceRegion(v), v)).partitionBy(GenomicRegionPartitioner(10, sd))
 
     var intRDD: IntervalRDD[ReferenceRegion,  AlignmentRecord] = IntervalRDD(alignmentRDD)
-    val filteredRDD = alignmentRDD.filter( r => (r._2.start < interval.end && r._2.end > interval.start) )
+    val filteredRDD = alignmentRDD.filter( r => (r._2.getStart < interval.end && r._2.getEnd > interval.start) )
     val results = intRDD.filterByInterval(interval)
     assert(results.count == filteredRDD.count)
   }
@@ -87,7 +73,6 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
     val region = new ReferenceRegion("chrM", 0L, 10000L)
     val interval = new ReferenceRegion("chrM", 0L, 1000L)
 
-    val sd = sc.adamDictionaryLoad[AlignmentRecord](filePath)
     val rdd: RDD[AlignmentRecord] = sc.loadIndexedBam(filePath, region)
 
     val alignmentRDD: RDD[(ReferenceRegion, AlignmentRecord)] = rdd.map(v => (ReferenceRegion(v), v)).partitionBy(GenomicRegionPartitioner(10, sd))
@@ -215,7 +200,6 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
     val filePath = "src/test/resources/mouse_chrM.bam"
     val region = new ReferenceRegion("chrM", 0L, 1000L)
 
-    val sd = sc.adamDictionaryLoad[AlignmentRecord](filePath)
     val rdd: RDD[AlignmentRecord] = sc.loadIndexedBam(filePath, region)
 
     val alignmentRDD: RDD[(ReferenceRegion, AlignmentRecord)] = rdd.map(v => (region, v))
@@ -248,7 +232,6 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
     val filePath = "src/test/resources/mouse_chrM.bam"
     val region = new ReferenceRegion("chrM", 0L, 20000L)
 
-    val sd = sc.adamDictionaryLoad[AlignmentRecord](filePath)
     val rdd: RDD[AlignmentRecord] = sc.loadIndexedBam(filePath, region)
 
     val alignmentRDD: RDD[(ReferenceRegion, AlignmentRecord)] = rdd.map(v => (ReferenceRegion(v), v))
@@ -366,7 +349,7 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
       SequenceRecord("chr3", 1000L)))
 
     var testRDD: IntervalRDD[ReferenceRegion,  String] = IntervalRDD(arrRDD)
-    var mapRDD: IntervalRDD[ReferenceRegion, String] = testRDD.mapValues(elem => (elem._1, elem._2 + "_mapped"))
+    var mapRDD: IntervalRDD[ReferenceRegion, String] = testRDD.mapValues(elem => elem + "_mapped")
     val results = mapRDD.get(overlapReg)
     assert(results(0) == (region1, "data1_mapped"))
   }
@@ -377,7 +360,6 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
     val region = new ReferenceRegion("chrM", 0L, 100L)
     val interval = new ReferenceRegion("X", 500L, 1000L)
 
-    val sd = sc.adamDictionaryLoad[AlignmentRecord](filePath)
     val rdd: RDD[AlignmentRecord] = sc.loadIndexedBam(filePath, region)
 
     val alignmentRDD: RDD[(ReferenceRegion, AlignmentRecord)] = rdd.map(v => (ReferenceRegion(v), v)).partitionBy(GenomicRegionPartitioner(10, sd))
@@ -426,7 +408,7 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
     intRDD = intRDD.multiput(data2)
     val inserted = intRDD.count
 
-    val filtered = intRDD.filterByInterval(ReferenceRegion("chr1", 0L, 10L)).count)
+    val filtered = intRDD.filterByInterval(ReferenceRegion("chr1", 0L, 10L)).count
     assert(filtered == inserted)
   }
 }

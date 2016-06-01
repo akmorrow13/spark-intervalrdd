@@ -17,20 +17,13 @@
 
 package edu.berkeley.cs.amplab.spark.intervalrdd
 
-import scala.reflect.ClassTag
-
-import org.apache.spark._
-import org.apache.spark.{ Partition, Dependency, SparkConf, Logging, SparkContext }
-import org.apache.spark.TaskContext
 import org.apache.spark.rdd.MetricsContext._
 import org.apache.spark.rdd.RDD
 import org.apache.spark.storage.StorageLevel
-import org.bdgenomics.adam.models.{ ReferenceRegion, Interval, SequenceDictionary }
-import org.bdgenomics.adam.rdd.GenomicPositionPartitioner
-import org.bdgenomics.utils.instrumentation.Metrics
-import scala.collection.mutable.ListBuffer
-import scala.collection.Map
-import com.github.erictu.intervaltree._
+import org.apache.spark.{Logging, Partition, TaskContext, _}
+import org.bdgenomics.adam.models.Interval
+
+import scala.reflect.ClassTag
 
 class IntervalRDD[K<: Interval: ClassTag, V: ClassTag](
     /** The underlying representation of the IndexedRDD as an RDD of partitions. */
@@ -46,11 +39,10 @@ class IntervalRDD[K<: Interval: ClassTag, V: ClassTag](
   /** Provides the `RDD[(K, V)]` equivalent output. */
   override def compute(part: Partition, context: TaskContext): Iterator[(K, V)] = {
     // This needs to be present to compile
-    // TODO: Implement this later
     null
   }
 
-  def toRDD(): RDD[(K, V)] = {
+  def toRDD: RDD[(K, V)] = {
     partitionsRDD.flatMap(_.get)
   }
 
@@ -59,80 +51,56 @@ class IntervalRDD[K<: Interval: ClassTag, V: ClassTag](
     this
   }
 
-  /** Persists the edge partitions using `targetStorageLevel`, which defaults to MEMORY_ONLY. */
+  /** Persists the interval partitions using `targetStorageLevel`, which defaults to MEMORY_ONLY. */
   override def persist(newLevel: StorageLevel): this.type = {
     partitionsRDD.persist(newLevel)
     this
   }
-
+  /** Unpersists the interval partitions using */
   override def unpersist(blocking: Boolean = true): this.type = {
     partitionsRDD.unpersist(blocking)
     this
   }
 
   /** The number of elements in the RDD. */
-  override def count(): Long = {
+  override def count: Long = {
     partitionsRDD.map(_.getTree.size).reduce(_ + _)
   }
 
-  override def collect(): Array[(K, V)] = partitionsRDD.flatMap(r => r.get()).collect
+  override def collect: Array[(K, V)] = partitionsRDD.flatMap(r => r.get()).collect
 
 
   def filterByInterval(r: K): IntervalRDD[K, V] = {
-    mapIntervalPartitions(r, (part) => part.filterByInterval(r))
+    mapIntervalPartitions(_.filterByInterval(r))
   }
 
 
   /**
    * Performs filtering given a predicate
    */
-  override def filter(pred: ((K, V)) => Boolean): IntervalRDD[K, V] = {
-    this.mapPartitionsGen(pred)
-  }
-
-     /**
-    * Maps each value, preserving the index.
-    */
-  def mapValues[V2: ClassTag](f: V => V2): IntervalRDD[K, V2] = {
-    this.mapFunction(f)
-  }
-
-  def mapFunction[V2: ClassTag](f: V => V2): IntervalRDD[K, V2] = {
-    this.withPartitionsRDD[K, V2](partitionsRDD.mapPartitions({ iter =>
-      if (iter.hasNext) {
-        val p = iter.next()
-        Iterator(p.mapValues(f))
-      } else {
-        Iterator.empty
-      }
-    }, preservesPartitioning = true))
+  override def filter(pred: Tuple2[K,V] => Boolean): IntervalRDD[K, V] = {
+    this.mapIntervalPartitions(_.filter(Function.untupled(pred)))
   }
 
   /**
-   * Applies a predicate to all partitions
-   */
-  def mapPartitionsGen(pred: ((K, V)) => Boolean): IntervalRDD[K, V] = {
-    this.withPartitionsRDD[K, V](partitionsRDD.mapPartitions({ iter =>
-      if (iter.hasNext) {
-        val p = iter.next()
-        Iterator(p.filter(pred))
-      } else {
-        Iterator.empty
-      }
-    }, preservesPartitioning = true))
+    * Maps each value, preserving the index.
+    */
+  def mapValues[V2: ClassTag](f: V => V2): IntervalRDD[K, V2] = {
+    this.mapIntervalPartitions(_.mapValues(f))
   }
 
+  /**
+   * Maps interval partitions in partitionsRDD
+   * @param f mapping function for interval partitions
+   * @tparam K2 key type extending Interval
+   * @tparam V2 data type
+   * @return new IntervalRDD of type [K2, V2]
+   */
+  def mapIntervalPartitions[K2 <: Interval: ClassTag, V2: ClassTag](
+                            f: (IntervalPartition[K, V]) => IntervalPartition[K2, V2]): IntervalRDD[K2, V2] = {
 
-  def mapIntervalPartitions(r: K,
-      f: (IntervalPartition[K, V]) => IntervalPartition[K, V]): IntervalRDD[K, V] = {
-    this.withPartitionsRDD[K, V](partitionsRDD.mapPartitions({ iter =>
-      if (iter.hasNext) {
-        val p = iter.next()
-        Iterator(p.filterByInterval(r))
-      } else {
-        Iterator.empty
-      }
-    }, preservesPartitioning = true))
+    val newPartitionsRDD = partitionsRDD.mapPartitions(_.map(f), preservesPartitioning = true)
+    new IntervalRDD(newPartitionsRDD)
   }
 
   private def withPartitionsRDD[K2 <: Interval: ClassTag, V2: ClassTag](
