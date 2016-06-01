@@ -54,6 +54,11 @@ class IntervalRDD[K<: Interval: ClassTag, V: ClassTag](
     partitionsRDD.flatMap(_.get)
   }
 
+  override def setName(_name: String): this.type = {
+    partitionsRDD.setName(_name)
+    this
+  }
+
   /** Persists the edge partitions using `targetStorageLevel`, which defaults to MEMORY_ONLY. */
   override def persist(newLevel: StorageLevel): this.type = {
     partitionsRDD.persist(newLevel)
@@ -85,14 +90,14 @@ class IntervalRDD[K<: Interval: ClassTag, V: ClassTag](
     this.mapPartitionsGen(pred)
   }
 
-   /**
+     /**
     * Maps each value, preserving the index.
     */
-  def mapValues[V2: ClassTag](f: ((K, V)) => (K, V2)): IntervalRDD[K, V2] = {
+  def mapValues[V2: ClassTag](f: V => V2): IntervalRDD[K, V2] = {
     this.mapFunction(f)
   }
 
-  def mapFunction[V2: ClassTag](f: ((K, V)) => (K, V2)): IntervalRDD[K, V2] = {
+  def mapFunction[V2: ClassTag](f: V => V2): IntervalRDD[K, V2] = {
     this.withPartitionsRDD[K, V2](partitionsRDD.mapPartitions({ iter =>
       if (iter.hasNext) {
         val p = iter.next()
@@ -173,6 +178,11 @@ class IntervalRDD[K<: Interval: ClassTag, V: ClassTag](
   /**
    * Unconditionally updates the specified keys to have the specified value. Returns a new IntervalRDD
    **/
+  def multiput(elem: (K, V)): IntervalRDD[K, V] = multiput(Array(elem))
+
+  /**
+   * Unconditionally updates the specified keys to have the specified value. Returns a new IntervalRDD
+   **/
   def multiput(elems: RDD[(K, V)]): IntervalRDD[K, V] = {
     val partitioned =
       if (elems.partitioner.isDefined) elems
@@ -190,8 +200,6 @@ class IntervalRDD[K<: Interval: ClassTag, V: ClassTag](
     new IntervalRDD(newPartitionsRDD)
   }
 }
-
-
 
 
 class PartitionMerger[K <: Interval, V: ClassTag]() extends Serializable {

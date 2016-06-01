@@ -40,6 +40,7 @@ import java.io.PrintWriter
 import java.io.StringWriter
 import java.io.OutputStreamWriter
 import org.bdgenomics.adam.util.ADAMFunSuite
+import scala.collection.mutable.ListBuffer
 
 import org.bdgenomics.adam.rdd.ADAMContext._
 import org.bdgenomics.formats.avro.{ AlignmentRecord, Feature, Genotype, GenotypeAllele, NucleotideContigFragment }
@@ -370,4 +371,62 @@ class IntervalRDDSuite extends ADAMFunSuite with Logging {
     assert(results(0) == (region1, "data1_mapped"))
   }
 
+  sparkTest("Attempt to access non existing data") {
+
+    val filePath = "./mouse_chrM.bam"
+    val region = new ReferenceRegion("chrM", 0L, 100L)
+    val interval = new ReferenceRegion("X", 500L, 1000L)
+
+    val sd = sc.adamDictionaryLoad[AlignmentRecord](filePath)
+    val rdd: RDD[AlignmentRecord] = sc.loadIndexedBam(filePath, region)
+
+    val alignmentRDD: RDD[(ReferenceRegion, AlignmentRecord)] = rdd.map(v => (ReferenceRegion(v), v)).partitionBy(GenomicRegionPartitioner(10, sd))
+
+    var intRDD: IntervalRDD[ReferenceRegion,  AlignmentRecord] = IntervalRDD(alignmentRDD)
+    val results = intRDD.filterByInterval(interval)
+
+    assert(results.count == 0)
+  }
+
+
+  sparkTest("Load and get alignment data from 2 different samples") {
+
+    val sample1 = "HG000096"
+    val sample2 = "HG000097"
+
+    val records1 = new ListBuffer[AlignmentRecord]
+    val records2 = new ListBuffer[AlignmentRecord]
+    val sequence = "GATAAA"
+
+    for (i <- 2L to 10L) {
+      records1 += AlignmentRecord.newBuilder()
+        .setStart(i)
+        .setEnd(i + sequence.length)
+        .setContigName("chr1")
+        .setSequence(sequence)
+        .setRecordGroupSample(sample1)
+        .build
+    }
+
+    for (i <- 0L to 9L) {
+      records2 += AlignmentRecord.newBuilder()
+        .setStart(i)
+        .setEnd(i + sequence.length)
+        .setContigName("chr1")
+        .setSequence(sequence)
+        .setRecordGroupSample(sample2)
+        .build
+    }
+
+    val data1 = sc.parallelize(records1).map(r => (ReferenceRegion(r), r))
+    val data2 = sc.parallelize(records2).map(r => (ReferenceRegion(r), r))
+
+    var intRDD: IntervalRDD[ReferenceRegion,  AlignmentRecord] = IntervalRDD(data1)
+
+    intRDD = intRDD.multiput(data2)
+    val inserted = intRDD.count
+
+    val filtered = intRDD.filterByInterval(ReferenceRegion("chr1", 0L, 10L)).count)
+    assert(filtered == inserted)
+  }
 }
